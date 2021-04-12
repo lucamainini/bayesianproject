@@ -1,0 +1,207 @@
+
+GEOMETRIC REGRESSION MODEL
+
+Definition of the MCM function
+```{r}
+geometricll=function(beta,y,X)
+{
+# LOG-POSTERIOR OF beta FOR THE GEOMETRIC MODEL UNDER FLAT PRIOR
+mu=exp(X%*%as.vector(beta)) #mu=(1-p)/p
+sum((y)*log(mu)-(y+1)*log(1+mu))
+}
+
+#Now let's write the MCM algorithm
+hmflatgeometric=function(niter,y,X,scale)
+{
+# A GAUSSIAN RANDOM WALK MH SAMPLER FOR THE PROBIT MODEL
+# UNDER FLAT PRIOR
+
+library(mnormt)
+p=dim(X)[2] #select the number of columns of X 
+mod=summary(glm.nb(y ~ 0+X, link = log)) 
+beta=matrix(0,niter,p) #matrix of 0 of dim (niter,p)
+beta[1,]=as.vector(mod$coeff[,1])  #as.vector(mod$coeff[,1])
+Sigma2=as.matrix(mod$cov.unscaled) # the asymptotic (Fisher)covariance matrix Σ of the                                     maximum likelihood estimate as the covariance matrix
+for (i in 2:niter)
+{
+tildebeta=rmnorm(1,beta[i-1,],scale*Sigma2) #rmnorm is a speed-optimised version of the                                               rnorm
+llr=geometricll(tildebeta,y,X)-geometricll(beta[i-1,],y,X) #log of the ratio pi(y)/pi(x)
+if (runif(1)<=exp(llr)) beta[i,]=tildebeta 
+else {
+  beta[i,]=beta[i-1,]}
+}
+beta
+}
+
+```
+
+Let's generate the data checking the existing conditions.
+NOTE: 1/(1+mu)>0, so mu>1
+```{r}
+library(MASS)
+n=100
+X<-matrix(rnorm(2*n,mean = 3, sd = 1),ncol=2)
+b<-runif(2,0,1)
+y=rep(0,n)
+posterior=rep(0,n)
+mu=rep(0,n)
+for (i in 1:n){
+  mu[i]=exp(X[i,]%*%b)
+  y[i]=rgeom(1, 1/(1+mu[i]))
+}
+ifelse(mu>1, TRUE, FALSE)
+```
+
+Let's apply the geometric regression model to our data.
+```{r}
+library(MASS)
+n=1000
+X<-matrix(rnorm(2*n,mean = 3, sd = 1),ncol=2)
+b<-runif(2,0,2)
+y=rep(0,n)
+posterior=rep(0,n)
+mu=rep(0,n)
+for (i in 1:n){
+  mu[i]=exp(X[i,]%*%b)
+  y[i]=rgeom(1, 1/(1+mu[i]))
+}
+state=ifelse(mu>1, TRUE, FALSE) 
+
+if(!all(state)) stop("This is an error message: mu must be >1") 
+
+#VISUALISATION OF DATA
+par(mfrow=c(1,3))
+hist(y,nclass=20, prob=TRUE)
+plot(X[,1],y)
+plot(X[,2],y)
+
+#USE OF hmflatgeometric
+flatgeometric=hmflatgeometric(10000,y,X,1)
+
+#PLOT OF useful hmflatgeometric information
+par(mfrow=c(2,3))
+plot(flatgeometric[,1],type="l",xlab="Iterations",ylab=expression(beta[1]))
+hist(flatgeometric[1001:10000,1],nclass=50, prob=TRUE,main="",xlab=expression(beta[1]))
+acf(flatgeometric[1001:10000,1],lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+plot(flatgeometric[,2],type="l",xlab="Iterations",ylab=expression(beta[2]))
+hist(flatgeometric[1001:10000,2],nclass=50,prob=TRUE,main="",xlab=expression(beta[2]))
+acf(flatgeometric[1001:10000,1],lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+sprintf("The expected beta was: [ %f %f ]", b[1], b[2])
+sprintf("While the obtained (average) beta is: [ %f %f ]", mean(flatgeometric[,1]), mean(flatgeometric[,2]))
+
+#OBTAINED ECDF
+y_f=rep(0,n)
+for (i in 1:n){
+  mu_f=exp(X[i,]%*%c(mean(flatgeometric[,1]),mean(flatgeometric[,2])))
+  y_f[i]=rgeom(1, 1/(1+mu_f))}
+
+plot(ecdf(y), col=rgb(0,0,1,1/4))
+plot(ecdf(y_f), add=T)
+
+
+```
+Let's study the rejection rate
+```{r}
+library(MASS)
+test_geom=function(niter,y,X,scale)
+{
+# A GAUSSIAN RANDOM WALK MH SAMPLER FOR THE PROBIT MODEL
+# UNDER FLAT PRIOR
+
+library(mnormt)
+p=dim(X)[2] #select the number of columns of X 
+mod=summary(glm.nb(y ~ 0+X, link = log)) 
+beta=matrix(0,niter,p) #matrix of 0 of dim (niter,p)
+beta[1,]=as.vector(mod$coeff[,1])  #as.vector(mod$coeff[,1])
+Sigma2=as.matrix(mod$cov.unscaled) # the asymptotic (Fisher)covariance matrix Σ of the                                     maximum likelihood estimate as the covariance matrix
+reject=0
+for (i in 2:niter)
+{
+tildebeta=rmnorm(1,beta[i-1,],scale*Sigma2) #rmnorm is a speed-optimised version of the                                               rnorm
+llr=geometricll(tildebeta,y,X)-geometricll(beta[i-1,],y,X) #log of the ratio pi(y)/pi(x)
+if (runif(1)<=exp(llr)) beta[i,]=tildebeta 
+else {
+  reject=reject+1
+  beta[i,]=beta[i-1,]}
+}
+result<-list(beta,reject/niter)
+names(result)<-c("beta", 'rej_rate')
+return(result)
+}
+
+#data generation
+n=100
+X<-matrix(rnorm(2*n,mean = 3, sd = 1),ncol=2)
+b<-runif(2,0,2)
+y=rep(0,n)
+posterior=rep(0,n)
+mu=rep(0,n)
+for (i in 1:n){
+  mu[i]=exp(X[i,]%*%b)
+  y[i]=rgeom(1, 1/(1+mu[i]))
+}
+
+#check existing conditions
+state=ifelse(mu>1, TRUE, FALSE) 
+if(!all(state)) stop("mu<1") #mu must be >1
+
+#results
+
+result<-test_geom(10000,y,X,1)
+flatgeometric=matrix(unlist(result[1]), ncol=2, byrow=F)
+flatgeometric_2=hmflatgeometric(10000,y,X,1)
+
+taux_refuse<-result[2]
+
+#plot
+par(mfrow=c(2,3))
+plot(flatgeometric[,1],type="l",xlab="Iterations",ylab=expression(beta[1]))
+hist(flatgeometric[1001:10000,1],nclass=50, prob=TRUE,main="",xlab=expression(beta[1]))
+acf(flatgeometric[1001:10000,1],lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+plot(flatgeometric[,2],type="l",xlab="Iterations",ylab=expression(beta[2]))
+hist(flatgeometric[1001:10000,2],nclass=50,prob=TRUE,main="",xlab=expression(beta[2]))
+acf(flatgeometric[1001:10000,1],lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+sprintf("The expected beta was: [ %f %f ]", b[1], b[2])
+sprintf("While the obtained (average) beta is: [ %f %f ]", mean(flatgeometric[,1]), mean(flatgeometric[,2]))
+
+
+```
+
+Test statistique
+
+```{r}
+library(MASS)
+n=1000
+for (k in 1:10){
+X<-matrix(rnorm(2*n,mean = 3, sd = 1),ncol=2)
+b<-runif(2,0,2)
+y=rep(0,n)
+posterior=rep(0,n)
+for (i in 1:n){
+  mu=exp(X[i,]%*%b)
+  y[i]=rgeom(1, 1/(1+mu))
+}
+results_1=rep(0,10)
+results_2=rep(0,10)
+
+flatgeometric=hmflatgeometric(10000,y,X,0.1)
+results_1[k]=mean(flatgeometric[,1])-b[1]
+results_2[k]=mean(flatgeometric[,2])-b[2]}
+print("TEST RESULTS")
+sprintf("MIN ABSOLUTE ERROR : [ %f %f ]", min(abs(results_1)), min(abs(results_2)))
+sprintf("MAX ABSOLUTE ERROR: [ %f %f ]", max(abs(results_1)), max(abs(results_2)))
+sprintf("MEAN ABSOLUTE ERROR : [ %f %f ]", mean(abs(results_1)), mean(abs(results_2)))
+
+
+```
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
