@@ -55,6 +55,8 @@ ifelse(mu>1, TRUE, FALSE)
 Let's apply the geometric regression model to our data.
 ```{r}
 library(MASS)
+
+#DATA GENERATION
 n=1000
 X<-matrix(rnorm(2*n,mean = 3, sd = 1),ncol=2)
 b<-runif(2,0,2)
@@ -102,7 +104,34 @@ plot(ecdf(y_f), add=T)
 
 
 ```
-Let's study the rejection rate
+COMPARING the influence of the variance of the proposal
+
+
+```{r}
+# GAUSSIAN RANDOM WALK MH FOR THE STANDARD NORMAL DISTRIBUTION
+#comparing the influence of the variance of the proposal
+
+test=hmflatgeometric(10000,y,X,0.001)
+par(mfrow=c(2,1))
+plot(test,type="l",xlab="Iterations",ylab="MH chain")
+hist(test[1001:10000],nclass=50,prob=TRUE,main="",xlab="x")
+acf(test,lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+test=hmflatgeometric(10000,y,X,1000)
+par(mfrow=c(2,1))
+plot(test,type="l",xlab="Iterations",ylab="MH chain")
+hist(test[1001:10000],nclass=50,prob=TRUE,main="",xlab="x")
+acf(test,lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+test=hmflatgeometric(10000,y,X,1)
+par(mfrow=c(2,1))
+plot(test,type="l",xlab="Iterations",ylab="MH chain")
+hist(test[1001:10000],nclass=50,prob=TRUE,main="",xlab="x")
+acf(test,lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+```
+
+Let's study the reject rate
 ```{r}
 library(MASS)
 test_geom=function(niter,y,X,scale)
@@ -165,13 +194,16 @@ plot(flatgeometric[,2],type="l",xlab="Iterations",ylab=expression(beta[2]))
 hist(flatgeometric[1001:10000,2],nclass=50,prob=TRUE,main="",xlab=expression(beta[2]))
 acf(flatgeometric[1001:10000,1],lag=1000,main="",ylab="Autocorrelation",ci=F)
 
-sprintf("The expected beta was: [ %f %f ]", b[1], b[2])
-sprintf("While the obtained (average) beta is: [ %f %f ]", mean(flatgeometric[,1]), mean(flatgeometric[,2]))
-
-
 ```
 
-Test statistique
+```{r}
+#RESULTS
+sprintf("The expected beta was: [ %f %f ]", b[1], b[2])
+sprintf("While the obtained (average) beta is: [ %f %f ]", mean(flatgeometric[,1]), mean(flatgeometric[,2]))
+sprintf("The reject rate is: %f ", taux_refuse)
+```
+
+Statistical test
 
 ```{r}
 library(MASS)
@@ -198,6 +230,85 @@ sprintf("MEAN ABSOLUTE ERROR : [ %f %f ]", mean(abs(results_1)), mean(abs(result
 
 
 ```
+
+2. NON-INFORMATIVE PRIOR
+
+```{r}
+
+geomnoinflpost=function(beta,y,X)
+{
+  
+#LOG-POSTERIOR OF beta FOR THE GEOMETRIC MODEL UNDER NON-INFORMATIVE PRIOR
+
+if (is.matrix(beta)==F) beta=as.matrix(t(beta))
+n=dim(beta)[1]
+k=dim(beta)[2]
+pll=rep(0,n)
+for (i in 1:n)
+{
+mu=exp(X%*%as.vector(beta)) #mu=(1-p)/p
+pll[i]=sum((y)*log(mu)-(y+1)*log(1+mu))-(2*k-1)/4*log(t(beta[i,])%*%t(X)%*%X%*%beta[i,])+lgamma((2*k-1)/4)-(k/2)*log(pi) #2.6
+}
+pll
+}
+
+hmnoinfgeom=function(niter,y,X,scale)
+{
+
+#A GAUSSIAN RANDOM WALK MH SAMPLER FOR THE GEOMETRIC MODEL
+# UNDER NON-INFORMATIVE PRIOR
+
+library(mnormt)
+p=dim(X)[2]
+mod=summary(glm.nb(y ~ 0+X, link = log)) 
+beta=matrix(0,niter,p)
+beta[1,]=as.vector(mod$coeff[,1])
+Sigma2=as.matrix(mod$cov.unscaled)
+
+for (i in 2:niter)
+{
+tildebeta=rmnorm(1,beta[i-1,],scale*Sigma2)
+llr=geomnoinflpost(tildebeta,y,X)-geomnoinflpost(beta[i-1,],y,X) #log of the ratio                                                                         pi(y)/pi(x)
+if (runif(1)<=exp(llr)) beta[i,]=tildebeta 
+else beta[i,]=beta[i-1,]
+}
+beta
+}
+
+```
+
+
+```{r}
+#DATA GENERATION
+n=1000
+X<-matrix(rnorm(2*n,mean = 3, sd = 1),ncol=2)
+b<-runif(2,0,2)
+y=rep(0,n)
+posterior=rep(0,n)
+mu=rep(0,n)
+for (i in 1:n){
+  mu[i]=exp(X[i,]%*%b)
+  y[i]=rgeom(1, 1/(1+mu[i]))
+}
+state=ifelse(mu>1, TRUE, FALSE) 
+
+if(!all(state)) stop("This is an error message: mu must be >1") 
+
+#USE OF hmnoinfgeom
+gpriorgeometric=hmnoinfgeom(10000,y,X,1)
+
+#PLOT OF useful hmflatgeometric information
+par(mfrow=c(2,3))
+plot(gpriorgeometric[,1],type="l",xlab="Iterations",ylab=expression(beta[1]))
+hist(gpriorgeometric[1001:10000,1],nclass=50, prob=TRUE,main="",xlab=expression(beta[1]))
+acf(gpriorgeometric[1001:10000,1],lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+plot(gpriorgeometric[,2],type="l",xlab="Iterations",ylab=expression(beta[2]))
+hist(gpriorgeometric[1001:10000,2],nclass=50,prob=TRUE,main="",xlab=expression(beta[2]))
+acf(gpriorgeometric[1001:10000,1],lag=1000,main="",ylab="Autocorrelation",ci=F)
+
+sprintf("The expected beta was: [ %f %f ]", b[1], b[2])
+sprintf("While the obtained (average) beta is: [ %f %f ]", mean(gpriorgeometric[,1]), mean(gpriorgeometric[,2]))
 ```
 
 Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
